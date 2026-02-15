@@ -9,6 +9,9 @@ import { Button } from "@/components/ui/button";
 import { CheckCircle, Tag, X } from "lucide-react";
 
 export default function CheckoutPage() {
+  const [guestName, setGuestName] = useState("");
+  const [guestPhone, setGuestPhone] = useState("");
+  const [guestEmail, setGuestEmail] = useState("");
   const { items, total, discount, couponCode, clearCart, applyCoupon, removeCoupon } = useCart();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -25,11 +28,21 @@ export default function CheckoutPage() {
   const grandTotal = total + gstAmount;
 
   const validate = (): string | null => {
-    if (items.length === 0) return "Your cart is empty.";
-    if (orderType === "dine_in" && !tableNumber.trim()) return "Please enter a table number for dine-in orders.";
-    if (grandTotal <= 0) return "Order total must be greater than zero.";
-    return null;
-  };
+  if (items.length === 0) return "Your cart is empty.";
+
+  if (orderType === "dine_in" && !tableNumber.trim())
+    return "Please enter a table number for dine-in orders.";
+
+  if (orderType === "pickup") {
+    if (!user && (!guestName.trim() || !guestPhone.trim()))
+      return "Name and phone required for pickup orders.";
+  }
+
+  if (grandTotal <= 0) return "Order total must be greater than zero.";
+
+  return null;
+};
+
 
   const handleApplyCoupon = async () => {
     if (!user) {
@@ -117,21 +130,27 @@ if (usage && data.usage_limit_per_user !== null && usage.used_count >= data.usag
 
       const { data: order, error } = await supabase
         .from("orders")
-        .insert({
-          customer_id: user?.id ?? null,
-          order_type: orderType,
-          table_id: tableId,
-          total: subtotal,
-          discount: discount || 0,
-          coupon_code: couponCode || null,
-          notes: notes || null,
-          status: "pending",
-          is_guest: isGuest,
-          gst_amount: gstAmount,
-          grand_total: grandTotal,
-          payment_method: "cash",
-          payment_status: "unpaid",
-        })
+.insert({
+  customer_id: user?.id ?? null,
+
+  // 👇 ADD THIS
+  customer_name: !user && orderType === "pickup" ? guestName : null,
+  customer_phone: !user && orderType === "pickup" ? guestPhone : null,
+
+  order_type: orderType,
+  table_id: tableId,
+  total: subtotal,
+  discount: discount || 0,
+  coupon_code: couponCode || null,
+  notes: notes || null,
+  status: "pending",
+  is_guest: isGuest,
+  gst_amount: gstAmount,
+  grand_total: grandTotal,
+  payment_method: "cash",
+  payment_status: "unpaid",
+})
+
         .select()
         .single();
 
@@ -222,6 +241,38 @@ if (couponCode && user) {
               </div>
 
               {/* Order type */}
+              {orderType === "pickup" && !user && (
+  <div className="bg-card rounded-lg border border-border p-6">
+    <h2 className="font-display text-lg font-semibold mb-4">Pickup Details</h2>
+
+    <div className="space-y-3">
+      <input
+        type="text"
+        placeholder="Full Name"
+        value={guestName}
+        onChange={(e) => setGuestName(e.target.value)}
+        className="w-full px-4 py-3 bg-background border border-border rounded-sm text-sm"
+      />
+
+      <input
+        type="tel"
+        placeholder="Phone Number"
+        value={guestPhone}
+        onChange={(e) => setGuestPhone(e.target.value)}
+        className="w-full px-4 py-3 bg-background border border-border rounded-sm text-sm"
+      />
+
+      <input
+        type="email"
+        placeholder="Email (optional)"
+        value={guestEmail}
+        onChange={(e) => setGuestEmail(e.target.value)}
+        className="w-full px-4 py-3 bg-background border border-border rounded-sm text-sm"
+      />
+    </div>
+  </div>
+)}
+
               <div className="bg-card rounded-lg border border-border p-6">
                 <h2 className="font-display text-lg font-semibold mb-4">Order Type</h2>
                 <div className="flex gap-3">
