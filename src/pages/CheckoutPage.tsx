@@ -66,6 +66,24 @@ export default function CheckoutPage() {
       return;
     }
 
+    // check usage count
+const { data: usage } = await supabase
+  .from("coupon_usages")
+  .select("used_count")
+  .eq("coupon_id", data.id)
+  .eq("user_id", user.id)
+  .maybeSingle();
+
+if (usage && data.usage_limit_per_user !== null && usage.used_count >= data.usage_limit_per_user) {
+  toast({
+    title: "Coupon limit reached",
+    description: "You have already used this coupon the maximum number of times",
+    variant: "destructive"
+  });
+  setCouponLoading(false);
+  return;
+}
+
     const err = applyCoupon(data.code, data.discount_type, data.discount_value, data.min_order);
     if (err) {
       toast({ title: "Cannot apply coupon", description: err, variant: "destructive" });
@@ -129,6 +147,23 @@ export default function CheckoutPage() {
 
       const { error: itemsError } = await supabase.from("order_items").insert(orderItems);
       if (itemsError) throw itemsError;
+
+      // record coupon usage
+if (couponCode && user) {
+  const { data: coupon } = await supabase
+    .from("coupons")
+    .select("id")
+    .eq("code", couponCode)
+    .single();
+
+  if (coupon) {
+    await supabase.rpc("increment_coupon_usage", {
+      uid: user.id,
+      cid: coupon.id
+    });
+  }
+}
+
 
       clearCart();
       setSuccess(true);
