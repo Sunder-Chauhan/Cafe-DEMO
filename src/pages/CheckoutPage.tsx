@@ -32,6 +32,15 @@ export default function CheckoutPage() {
   };
 
   const handleApplyCoupon = async () => {
+    if (!user) {
+  toast({
+    title: "Login required",
+    description: "Please login to use coupons",
+    variant: "destructive"
+  });
+  return;
+}
+
     const code = couponInput.trim().toUpperCase();
     if (!code) {
       toast({ title: "Enter a coupon code", variant: "destructive" });
