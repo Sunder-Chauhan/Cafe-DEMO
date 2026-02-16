@@ -13,6 +13,7 @@ interface MenuItem {
   category_id: string;
   is_available: boolean;
   image_url: string | null;
+  is_special: boolean;
   sort_order: number;
 }
 
@@ -37,9 +38,12 @@ export default function MenuManager() {
     description: "",
     price: "",
     category_id: "",
-    is_available: true
+    is_available: true,
+    image_url: "",
+    is_special: false
   });
 
+  // ---------------- FETCH ----------------
   const fetchData = async () => {
     const [itemsRes, catsRes] = await Promise.all([
       supabase.from("menu_items").select("*").order("sort_order"),
@@ -54,7 +58,6 @@ export default function MenuManager() {
   useEffect(() => { fetchData(); }, []);
 
   // ---------------- CATEGORY CRUD ----------------
-
   const addCategory = async () => {
     if (!newCategory.trim()) return;
 
@@ -88,10 +91,17 @@ export default function MenuManager() {
   };
 
   // ---------------- ITEM CRUD ----------------
-
   const openAdd = () => {
     setEditItem(null);
-    setForm({ name: "", description: "", price: "", category_id: categories[0]?.id ?? "", is_available: true });
+    setForm({
+      name: "",
+      description: "",
+      price: "",
+      category_id: categories[0]?.id ?? "",
+      is_available: true,
+      image_url: "",
+      is_special: false
+    });
     setShowForm(true);
   };
 
@@ -102,7 +112,9 @@ export default function MenuManager() {
       description: item.description ?? "",
       price: String(item.price),
       category_id: item.category_id,
-      is_available: item.is_available
+      is_available: item.is_available,
+      image_url: item.image_url ?? "",
+      is_special: item.is_special ?? false
     });
     setShowForm(true);
   };
@@ -114,6 +126,8 @@ export default function MenuManager() {
       price: parseFloat(form.price),
       category_id: form.category_id,
       is_available: form.is_available,
+      image_url: form.image_url || null,
+      is_special: form.is_special
     };
 
     if (editItem) {
@@ -140,6 +154,11 @@ export default function MenuManager() {
     fetchData();
   };
 
+  const toggleSpecial = async (item: MenuItem) => {
+    await supabase.from("menu_items").update({ is_special: !item.is_special }).eq("id", item.id);
+    fetchData();
+  };
+
   if (loading) return <div className="flex justify-center py-12"><div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
 
   return (
@@ -151,12 +170,7 @@ export default function MenuManager() {
 
       {/* ADD CATEGORY */}
       <div className="flex gap-2 mb-6">
-        <input
-          value={newCategory}
-          onChange={(e) => setNewCategory(e.target.value)}
-          placeholder="New category name"
-          className="px-3 py-2 border rounded-md text-sm"
-        />
+        <input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="New category name" className="px-3 py-2 border rounded-md text-sm" />
         <Button onClick={addCategory}>Add Category</Button>
       </div>
 
@@ -179,9 +193,15 @@ export default function MenuManager() {
                 <div className="space-y-2">
                   {catItems.map((item) => (
                     <div key={item.id} className="flex items-center gap-4 bg-card border border-border rounded-lg p-4">
+
+                      {item.image_url && (
+                        <img src={item.image_url} alt={item.name} className="w-16 h-16 object-cover rounded" />
+                      )}
+
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{item.name}</span>
+                          {item.is_special && <span className="text-yellow-500 text-sm">⭐</span>}
                           {!item.is_available && <span className="text-xs bg-destructive/10 text-destructive px-2 py-0.5 rounded">Unavailable</span>}
                         </div>
                         <p className="text-sm text-muted-foreground">{item.description}</p>
@@ -190,6 +210,7 @@ export default function MenuManager() {
                       <span className="font-bold">£{Number(item.price).toFixed(2)}</span>
 
                       <div className="flex gap-1">
+                        <Button size="icon" variant={item.is_special ? "default" : "ghost"} onClick={() => toggleSpecial(item)}>⭐</Button>
                         <Button size="icon" variant="ghost" onClick={() => toggleAvailability(item)}>
                           <div className={`w-3 h-3 rounded-full ${item.is_available ? "bg-green-500" : "bg-red-500"}`} />
                         </Button>
@@ -213,13 +234,20 @@ export default function MenuManager() {
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Name" className="w-full px-3 py-2 border rounded-md text-sm" />
             <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Description" rows={2} className="w-full px-3 py-2 border rounded-md text-sm resize-none" />
             <input type="number" step="0.01" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="Price" className="w-full px-3 py-2 border rounded-md text-sm" />
+            <input value={form.image_url} onChange={(e) => setForm({ ...form, image_url: e.target.value })} placeholder="Image URL" className="w-full px-3 py-2 border rounded-md text-sm" />
 
             <select value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })} className="w-full px-3 py-2 border rounded-md text-sm">
               {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
 
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={form.is_available} onChange={(e) => setForm({ ...form, is_available: e.target.checked })} />Available
+              <input type="checkbox" checked={form.is_special} onChange={(e) => setForm({ ...form, is_special: e.target.checked })} />
+              Show in Chef's Specials
+            </label>
+
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.is_available} onChange={(e) => setForm({ ...form, is_available: e.target.checked })} />
+              Available
             </label>
 
             <Button onClick={handleSave} className="w-full">{editItem ? "Update" : "Add"}</Button>
