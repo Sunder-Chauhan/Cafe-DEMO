@@ -135,7 +135,8 @@ export default function CheckoutPage() {
           customer_phone: customerPhone,
           customer_address: orderType === "delivery" ? customerAddress : null,
           order_type: orderType,
-          table_number: orderType === "dine_in" ? parseInt(tableNumber) : null,
+          table_number:
+          orderType === "dine_in" && tableNumber.trim() !== "" ? parseInt(tableNumber) : null,
           total: subtotal,
           discount: discount || 0,
           coupon_code: couponCode || null,
