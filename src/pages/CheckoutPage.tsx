@@ -36,16 +36,17 @@ export default function CheckoutPage() {
   const validate = (): string | null => {
     if (items.length === 0) return "Your cart is empty.";
 
-    if (orderType === "pickup" || orderType === "delivery") {
-      if (!user) return "Login required for pickup or delivery.";
-    }
-
     if (orderType === "dine_in" && !tableNumber.trim())
       return "Table number is required.";
 
-    if (orderType === "delivery") {
-      if (!customerAddress.trim()) return "Full delivery address required.";
+    if (orderType === "pickup" || orderType === "delivery") {
+      if (!user) return "Login required for pickup or delivery.";
+      if (!customerName.trim()) return "Full name is required.";
+      if (!customerPhone.trim()) return "Phone number is required.";
     }
+
+    if (orderType === "delivery" && !customerAddress.trim())
+      return "Full delivery address is required.";
 
     return null;
   };
@@ -80,7 +81,7 @@ export default function CheckoutPage() {
       return;
     }
 
-    // Check per-user usage limit
+    // per-user usage limit check
     const { data: usage } = await supabase
       .from("coupon_usages")
       .select("used_count")
@@ -130,8 +131,8 @@ export default function CheckoutPage() {
         .from("orders")
         .insert({
           customer_id: user?.id ?? null,
-          customer_name: user?.user_metadata?.full_name ?? customerName ?? null,
-          customer_phone: user?.user_metadata?.phone ?? customerPhone ?? null,
+          customer_name: customerName,
+          customer_phone: customerPhone,
           customer_address: orderType === "delivery" ? customerAddress : null,
           order_type: orderType,
           table_number: orderType === "dine_in" ? parseInt(tableNumber) : null,
@@ -161,7 +162,7 @@ export default function CheckoutPage() {
 
       await supabase.from("order_items").insert(orderItems);
 
-      // Increment coupon usage AFTER successful order
+      // increment coupon usage
       if (couponCode && user) {
         const { data: coupon } = await supabase
           .from("coupons")
@@ -180,6 +181,7 @@ export default function CheckoutPage() {
       clearCart();
       setSuccess(true);
       toast({ title: "Order placed successfully" });
+
     } catch (e: any) {
       toast({
         title: "Order failed",
@@ -191,7 +193,7 @@ export default function CheckoutPage() {
     setLoading(false);
   };
 
-  // ================= SUCCESS SCREEN =================
+  // ================= SUCCESS =================
 
   if (success) {
     return (
@@ -213,6 +215,30 @@ export default function CheckoutPage() {
     <div className="min-h-screen bg-background py-12">
       <div className="container mx-auto max-w-2xl space-y-6">
 
+        {/* ORDER SUMMARY */}
+        <div className="bg-card p-6 border rounded-lg space-y-3">
+          <h2 className="font-bold text-lg">Invoice</h2>
+          {items.map((item) => (
+            <div key={item.id} className="flex justify-between text-sm">
+              <span>{item.name} × {item.quantity}</span>
+              <span>£{(item.price * item.quantity).toFixed(2)}</span>
+            </div>
+          ))}
+          <div className="border-t pt-2 text-sm">
+            <div className="flex justify-between"><span>Subtotal</span><span>£{subtotal.toFixed(2)}</span></div>
+            {discount > 0 && (
+              <div className="flex justify-between text-green-600">
+                <span>Discount ({couponCode})</span>
+                <span>-£{discount.toFixed(2)}</span>
+              </div>
+            )}
+            <div className="flex justify-between font-bold">
+              <span>Grand Total</span>
+              <span>£{grandTotal.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+
         {/* ORDER TYPE */}
         <div className="flex gap-2">
           {["dine_in", "pickup", "delivery"].map((type) => (
@@ -228,7 +254,7 @@ export default function CheckoutPage() {
           ))}
         </div>
 
-        {/* TABLE NUMBER */}
+        {/* TABLE */}
         {orderType === "dine_in" && (
           <input
             type="number"
@@ -239,10 +265,33 @@ export default function CheckoutPage() {
           />
         )}
 
+        {/* CONTACT SECTION */}
+        {(orderType === "pickup" || orderType === "delivery") && (
+          <div className="bg-card p-4 border rounded-lg space-y-3">
+            <h3 className="font-semibold">Contact Information</h3>
+            <input
+              type="text"
+              placeholder="Full Name"
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              className="w-full px-3 py-2 border rounded"
+            />
+            <input
+              type="tel"
+              placeholder="Phone (numeric only)"
+              value={customerPhone}
+              onChange={(e) =>
+                setCustomerPhone(e.target.value.replace(/[^0-9]/g, ""))
+              }
+              className="w-full px-3 py-2 border rounded"
+            />
+          </div>
+        )}
+
         {/* DELIVERY ADDRESS */}
         {orderType === "delivery" && (
           <textarea
-            placeholder="Full Delivery Address"
+            placeholder="Full Address"
             value={customerAddress}
             onChange={(e) => setCustomerAddress(e.target.value)}
             className="w-full px-3 py-2 border rounded resize-none"
@@ -250,11 +299,17 @@ export default function CheckoutPage() {
           />
         )}
 
-        {/* COUPON SECTION */}
+        {/* COUPON */}
         <div className="bg-card p-4 border rounded-lg">
           <h3 className="flex items-center gap-2 mb-2">
             <Tag className="w-4 h-4" /> Coupon Code
           </h3>
+
+          {!user && (
+            <p className="text-sm text-muted-foreground mb-2">
+              Login required to use coupons
+            </p>
+          )}
 
           {couponCode ? (
             <div className="flex justify-between items-center">
@@ -278,7 +333,6 @@ export default function CheckoutPage() {
           )}
         </div>
 
-        {/* PLACE ORDER */}
         <Button onClick={handlePlaceOrder} disabled={loading} className="w-full py-4">
           {loading ? "Placing Order..." : `Place Order · £${grandTotal.toFixed(2)}`}
         </Button>
