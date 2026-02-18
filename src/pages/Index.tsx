@@ -5,33 +5,45 @@ import { Link } from "react-router-dom";
 import { Heart, Star, Clock, MapPin, ArrowRight } from "lucide-react";
 import heroImage from "@/assets/hero-restaurant.jpg";
 
-const offers = [
-  { code: "LOVE20", desc: "20% off your entire order" },
-  { code: "COUPLE10", desc: "£10 off orders over £50" },
-  { code: "ROSEFREE", desc: "Free dessert with any main" },
-];
-
 export default function Index() {
   const [featuredItems, setFeaturedItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [offers, setOffers] = useState<any[]>([]);
+  const [loadingSpecials, setLoadingSpecials] = useState(true);
+  const [loadingOffers, setLoadingOffers] = useState(true);
+
+  // ---------------- LOAD SPECIALS ----------------
+  const loadSpecials = async () => {
+    const { data } = await supabase
+      .from("menu_items")
+      .select("*")
+      .eq("is_special", true)
+      .eq("is_available", true)
+      .order("sort_order")
+      .limit(4);
+
+    setFeaturedItems(data || []);
+    setLoadingSpecials(false);
+  };
+
+  // ---------------- LOAD OFFERS ----------------
+  const loadOffers = async () => {
+    const { data } = await supabase
+      .from("coupons")
+      .select("*")
+      .eq("is_active", true)
+      .eq("show_on_home", true)
+      .order("created_at", { ascending: false });
+
+    setOffers(data || []);
+    setLoadingOffers(false);
+  };
 
   useEffect(() => {
-    const loadSpecials = async () => {
-      const { data } = await supabase
-        .from("menu_items")
-        .select("*")
-        .eq("is_special", true)
-        .eq("is_available", true)
-        .limit(4);
-
-      setFeaturedItems(data || []);
-      setLoading(false);
-    };
-
     loadSpecials();
+    loadOffers();
 
-    // realtime update when admin edits ⭐
-    const channel = supabase
+    // realtime specials
+    const specialsChannel = supabase
       .channel("specials-live")
       .on(
         "postgres_changes",
@@ -40,7 +52,20 @@ export default function Index() {
       )
       .subscribe();
 
-    return () => supabase.removeChannel(channel);
+    // realtime offers
+    const offersChannel = supabase
+      .channel("offers-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "coupons" },
+        loadOffers
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(specialsChannel);
+      supabase.removeChannel(offersChannel);
+    };
   }, []);
 
   return (
@@ -55,7 +80,7 @@ export default function Index() {
         <div className="relative z-10 text-center px-4 max-w-4xl mx-auto">
           <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }}>
             <p className="text-secondary font-serif tracking-[0.3em] uppercase mb-4">
-              Valentine's Edition
+              Premium Dining Experience
             </p>
 
             <h1 className="font-display text-6xl font-bold text-primary-foreground mb-6">
@@ -66,14 +91,14 @@ export default function Index() {
             </h1>
 
             <p className="text-primary-foreground/70 max-w-2xl mx-auto mb-8">
-              An unforgettable dining experience where luxury meets love.
+              Where luxury meets unforgettable flavours.
             </p>
 
             <div className="flex gap-4 justify-center">
               <Link to="/menu" className="px-8 py-3 bg-secondary text-secondary-foreground">
                 View Menu
               </Link>
-              <Link to="/login" className="px-8 py-3 border border-primary-foreground/30 text-primary-foreground">
+              <Link to="/menu" className="px-8 py-3 border border-primary-foreground/30 text-primary-foreground">
                 Order Now
               </Link>
             </div>
@@ -93,21 +118,21 @@ export default function Index() {
       {/* CHEF SPECIALS */}
       <section className="py-24 bg-background">
         <div className="container mx-auto px-4 text-center mb-16">
-          <p className="text-secondary tracking-[0.3em] uppercase mb-3">Curated Selection</p>
+          <p className="text-secondary tracking-[0.3em] uppercase mb-3">Today's Special</p>
           <h2 className="font-display text-5xl font-bold">Chef's Favourites</h2>
         </div>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 container mx-auto px-4">
 
-          {loading && (
+          {loadingSpecials && (
             <p className="col-span-full text-center text-muted-foreground">
               Loading specials...
             </p>
           )}
 
-          {!loading && featuredItems.length === 0 && (
+          {!loadingSpecials && featuredItems.length === 0 && (
             <p className="col-span-full text-center text-muted-foreground">
-              No specials selected by restaurant yet
+              No specials selected yet.
             </p>
           )}
 
@@ -149,14 +174,43 @@ export default function Index() {
         </div>
       </section>
 
-      {/* OFFERS */}
+      {/* OFFERS - DYNAMIC */}
       <section className="py-20 bg-primary text-center">
-        <h2 className="font-display text-5xl text-primary-foreground mb-12">Valentine's Offers</h2>
+        <h2 className="font-display text-5xl text-primary-foreground mb-12">
+          Current Offers
+        </h2>
+
         <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto">
-          {offers.map(o => (
-            <div key={o.code} className="border border-secondary/30 rounded-lg p-8">
-              <p className="text-secondary text-2xl font-bold">{o.code}</p>
-              <p className="text-primary-foreground/70">{o.desc}</p>
+
+          {loadingOffers && (
+            <p className="col-span-full text-primary-foreground/70">
+              Loading offers...
+            </p>
+          )}
+
+          {!loadingOffers && offers.length === 0 && (
+            <p className="col-span-full text-primary-foreground/70">
+              No active offers at the moment.
+            </p>
+          )}
+
+          {offers.map((o) => (
+            <div key={o.id} className="border border-secondary/30 rounded-lg p-8">
+              <p className="text-secondary text-2xl font-bold">
+                {o.code}
+              </p>
+
+              <p className="text-primary-foreground/80 mt-2">
+                {o.discount_type === "percentage"
+                  ? `${o.discount_value}% OFF`
+                  : `£${o.discount_value} OFF`}
+              </p>
+
+              {o.min_order && (
+                <p className="text-xs text-primary-foreground/60 mt-2">
+                  Min Order £{o.min_order}
+                </p>
+              )}
             </div>
           ))}
         </div>
