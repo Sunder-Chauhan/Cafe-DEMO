@@ -118,81 +118,102 @@ export default function CheckoutPage() {
   // ================= PLACE ORDER =================
 
   const handlePlaceOrder = async () => {
-    const err = validate();
-    if (err) {
-      toast({ title: "Validation Error", description: err, variant: "destructive" });
-      return;
-    }
+  const err = validate();
+  if (err) {
+    toast({ title: "Validation Error", description: err, variant: "destructive" });
+    return;
+  }
 
-    setLoading(true);
+  setLoading(true);
 
-    try {
-      const { data: order, error } = await supabase
-        .from("orders")
-        .insert({
-          customer_id: user?.id ?? null,
-          customer_name: customerName,
-          customer_phone: customerPhone,
-          customer_address: orderType === "delivery" ? customerAddress : null,
-          order_type: orderType,
-          table_number:
-          orderType === "dine_in" && tableNumber.trim() !== "" ? parseInt(tableNumber) : null,
-          total: subtotal,
-          discount: discount || 0,
-          coupon_code: couponCode || null,
-          notes: notes || null,
-          status: "pending",
-          is_guest: !user,
-          gst_amount: gstAmount,
-          grand_total: grandTotal,
-          payment_method: "cash",
-          payment_status: "unpaid",
-        })
-        .select()
+  try {
+    let profileId: string | null = null;
+
+    // 🔹 Fetch profile ID if user logged in
+    if (user) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("user_id", user.id)
         .single();
 
-      if (error) throw error;
-
-      const orderItems = items.map((item) => ({
-        order_id: order.id,
-        item_id: item.id,
-        item_name: item.name,
-        quantity: item.quantity,
-        price: item.price,
-      }));
-
-      await supabase.from("order_items").insert(orderItems);
-
-      // increment coupon usage
-      if (couponCode && user) {
-        const { data: coupon } = await supabase
-          .from("coupons")
-          .select("id")
-          .eq("code", couponCode)
-          .single();
-
-        if (coupon) {
-          await supabase.rpc("increment_coupon_usage", {
-            uid: user.id,
-            cid: coupon.id,
-          });
-        }
-      }
-
-      clearCart();
-      setSuccess(true);
-      toast({ title: "Order placed successfully" });
-
-    } catch (e: any) {
-      toast({
-        title: "Order failed",
-        description: e.message,
-        variant: "destructive"
-      });
+      profileId = profile?.id ?? null;
     }
 
-    setLoading(false);
-  };
+    const { data: order, error } = await supabase
+      .from("orders")
+      .insert({
+        customer_id: profileId, // ✅ correct foreign key
+
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        customer_address:
+          orderType === "delivery" ? customerAddress : null,
+
+        order_type: orderType,
+
+        table_number:
+          orderType === "dine_in" && tableNumber.trim() !== ""
+            ? parseInt(tableNumber)
+            : null,
+
+        total: subtotal,
+        discount: discount || 0,
+        coupon_code: couponCode || null,
+        notes: notes || null,
+        status: "pending",
+        is_guest: !user,
+        gst_amount: gstAmount,
+        grand_total: grandTotal,
+        payment_method: "cash",
+        payment_status: "unpaid",
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    const orderItems = items.map((item) => ({
+      order_id: order.id,
+      item_id: item.id,
+      item_name: item.name,
+      quantity: item.quantity,
+      price: item.price,
+    }));
+
+    await supabase.from("order_items").insert(orderItems);
+
+    // 🔹 Increment coupon usage only AFTER successful order
+    if (couponCode && user) {
+      const { data: coupon } = await supabase
+        .from("coupons")
+        .select("id")
+        .eq("code", couponCode)
+        .single();
+
+      if (coupon) {
+        await supabase.rpc("increment_coupon_usage", {
+          uid: user.id,
+          cid: coupon.id,
+        });
+      }
+    }
+
+    clearCart();
+    setSuccess(true);
+    toast({ title: "Order placed successfully" });
+
+  } catch (e: any) {
+    toast({
+      title: "Order failed",
+      description: e.message,
+      variant: "destructive",
+    });
+  }
+
+  setLoading(false);
+};
+
 
   // ================= SUCCESS =================
 
