@@ -14,43 +14,37 @@ export default function CheckoutPage() {
   const navigate = useNavigate();
 
   const [orderType, setOrderType] = useState<"dine_in" | "pickup" | "delivery">("dine_in");
-
-  const [guestName, setGuestName] = useState("");
-  const [guestPhone, setGuestPhone] = useState("");
-  const [guestEmail, setGuestEmail] = useState("");
-
-  const [deliveryAddress, setDeliveryAddress] = useState("");
-  const [deliveryPostcode, setDeliveryPostcode] = useState("");
-
   const [tableNumber, setTableNumber] = useState("");
+
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [customerAddress, setCustomerAddress] = useState("");
+
   const [notes, setNotes] = useState("");
-
-  const [couponInput, setCouponInput] = useState("");
-  const [couponLoading, setCouponLoading] = useState(false);
-
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [couponInput, setCouponInput] = useState("");
+  const [couponLoading, setCouponLoading] = useState(false);
 
   const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
   const gstAmount = 0;
   const grandTotal = total + gstAmount;
 
-  // ---------------- VALIDATION ----------------
-
   const validate = (): string | null => {
     if (items.length === 0) return "Your cart is empty.";
 
     if (orderType === "dine_in" && !tableNumber.trim())
-      return "Table number required.";
+      return "Table number is required.";
 
-    if ((orderType === "pickup" || orderType === "delivery") && !user) {
-      if (!guestName.trim()) return "Name required.";
-      if (!guestPhone.trim()) return "Phone required.";
+    if (orderType === "pickup") {
+      if (!customerName.trim()) return "Full name required.";
+      if (!/^[0-9]{7,15}$/.test(customerPhone)) return "Valid numeric phone required.";
     }
 
     if (orderType === "delivery") {
-      if (!deliveryAddress.trim()) return "Delivery address required.";
-      if (!deliveryPostcode.trim()) return "Postcode required.";
+      if (!customerName.trim()) return "Full name required.";
+      if (!/^[0-9]{7,15}$/.test(customerPhone)) return "Valid numeric phone required.";
+      if (!customerAddress.trim()) return "Full address required.";
     }
 
     if (grandTotal <= 0) return "Order total must be greater than zero.";
@@ -58,15 +52,9 @@ export default function CheckoutPage() {
     return null;
   };
 
-  // ---------------- COUPON APPLY ----------------
-
   const handleApplyCoupon = async () => {
     if (!user) {
-      toast({
-        title: "Login required",
-        description: "Please login to use coupons",
-        variant: "destructive",
-      });
+      toast({ title: "Login required", description: "Please login to use coupons", variant: "destructive" });
       return;
     }
 
@@ -88,12 +76,6 @@ export default function CheckoutPage() {
       return;
     }
 
-    if (data.expires_at && new Date(data.expires_at) < new Date()) {
-      toast({ title: "Coupon expired", variant: "destructive" });
-      setCouponLoading(false);
-      return;
-    }
-
     const { data: usage } = await supabase
       .from("coupon_usages")
       .select("used_count")
@@ -101,72 +83,36 @@ export default function CheckoutPage() {
       .eq("user_id", user.id)
       .maybeSingle();
 
-    if (
-      usage &&
-      data.usage_limit_per_user &&
-      usage.used_count >= data.usage_limit_per_user
-    ) {
-      toast({
-        title: "Coupon limit reached",
-        variant: "destructive",
-      });
+    if (usage && data.usage_limit_per_user && usage.used_count >= data.usage_limit_per_user) {
+      toast({ title: "Coupon limit reached", variant: "destructive" });
       setCouponLoading(false);
       return;
     }
 
-    const err = applyCoupon(
-      data.code,
-      data.discount_type,
-      data.discount_value,
-      data.min_order
-    );
-
-    if (!err) {
-      toast({ title: "Coupon applied!" });
-      setCouponInput("");
-    }
-
+    const err = applyCoupon(data.code, data.discount_type, data.discount_value, data.min_order);
+    if (!err) setCouponInput("");
     setCouponLoading(false);
   };
-
-  // ---------------- PLACE ORDER ----------------
 
   const handlePlaceOrder = async () => {
     const err = validate();
     if (err) {
-      toast({ title: err, variant: "destructive" });
+      toast({ title: "Validation Error", description: err, variant: "destructive" });
       return;
     }
 
     setLoading(true);
 
     try {
-      let tableId: string | null = null;
-
-      if (orderType === "dine_in") {
-        const { data } = await supabase
-          .from("cafe_tables")
-          .select("id")
-          .eq("table_number", parseInt(tableNumber))
-          .single();
-        tableId = data?.id ?? null;
-      }
-
       const { data: order, error } = await supabase
         .from("orders")
         .insert({
           customer_id: user?.id ?? null,
-
-          // guest fields
-          guest_name: !user ? guestName : null,
-          guest_phone: !user ? guestPhone : null,
-          guest_email: !user ? guestEmail : null,
-
+          customer_name: customerName || null,
+          customer_phone: customerPhone || null,
+          customer_address: orderType === "delivery" ? customerAddress : null,
           order_type: orderType,
-          table_id: tableId,
-          delivery_address: orderType === "delivery" ? deliveryAddress : null,
-          delivery_postcode: orderType === "delivery" ? deliveryPostcode : null,
-
+          table_number: orderType === "dine_in" ? parseInt(tableNumber) : null,
           total: subtotal,
           discount: discount || 0,
           coupon_code: couponCode || null,
@@ -193,126 +139,124 @@ export default function CheckoutPage() {
 
       await supabase.from("order_items").insert(orderItems);
 
-      // record coupon usage
       if (couponCode && user) {
-        const { data: coupon } = await supabase
-          .from("coupons")
-          .select("id")
-          .eq("code", couponCode)
-          .single();
-
+        const { data: coupon } = await supabase.from("coupons").select("id").eq("code", couponCode).single();
         if (coupon) {
-          await supabase.rpc("increment_coupon_usage", {
-            uid: user.id,
-            cid: coupon.id,
-          });
+          await supabase.rpc("increment_coupon_usage", { uid: user.id, cid: coupon.id });
         }
       }
 
       clearCart();
       setSuccess(true);
-    } catch (err: any) {
-      toast({ title: err.message, variant: "destructive" });
+      toast({ title: "Order placed successfully" });
+    } catch (e: any) {
+      toast({ title: "Order failed", description: e.message, variant: "destructive" });
     }
 
     setLoading(false);
   };
 
-  // ---------------- SUCCESS PAGE ----------------
-
   if (success) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }}>
+        <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }} className="text-center">
           <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
-          <h1 className="text-3xl font-bold mb-4">Order Confirmed!</h1>
-          <Button onClick={() => navigate("/menu")}>Back to Menu</Button>
+          <h1 className="text-3xl font-bold">Order Confirmed!</h1>
+          <Button onClick={() => navigate("/menu")} className="mt-6">Back to Menu</Button>
         </motion.div>
       </div>
     );
   }
 
-  // ---------------- MAIN UI ----------------
-
   return (
-    <div className="min-h-screen bg-background p-6 max-w-2xl mx-auto space-y-6">
+    <div className="min-h-screen bg-background py-12">
+      <div className="container mx-auto max-w-2xl space-y-6">
 
-      {/* ORDER TYPE */}
-      <div className="flex gap-2">
-        {(["dine_in", "pickup", "delivery"] as const).map((type) => (
-          <button
-            key={type}
-            onClick={() => setOrderType(type)}
-            className={`flex-1 py-3 rounded ${
-              orderType === type
-                ? "bg-primary text-white"
-                : "bg-muted"
-            }`}
-          >
-            {type.toUpperCase()}
-          </button>
-        ))}
+        {/* ORDER SUMMARY */}
+        <div className="bg-card p-6 border rounded-lg">
+          <h2 className="font-bold mb-4">Order Summary</h2>
+          {items.map((item) => (
+            <div key={item.id} className="flex justify-between text-sm mb-2">
+              <span>{item.name} × {item.quantity}</span>
+              <span>£{(item.price * item.quantity).toFixed(2)}</span>
+            </div>
+          ))}
+          <div className="border-t pt-3 mt-3 space-y-1 text-sm">
+            <div className="flex justify-between"><span>Subtotal</span><span>£{subtotal.toFixed(2)}</span></div>
+            {discount > 0 && <div className="flex justify-between text-green-600"><span>Discount</span><span>-£{discount.toFixed(2)}</span></div>}
+            <div className="flex justify-between font-bold"><span>Total</span><span>£{grandTotal.toFixed(2)}</span></div>
+          </div>
+        </div>
+
+        {/* ORDER TYPE */}
+        <div className="bg-card p-6 border rounded-lg space-y-4">
+          <div className="flex gap-2">
+            {["dine_in", "pickup", "delivery"].map((type) => (
+              <button
+                key={type}
+                onClick={() => setOrderType(type as any)}
+                className={`flex-1 py-2 rounded ${orderType === type ? "bg-primary text-white" : "bg-muted"}`}
+              >
+                {type.replace("_", " ").toUpperCase()}
+              </button>
+            ))}
+          </div>
+
+          {orderType === "dine_in" && (
+            <input
+              type="number"
+              placeholder="Table Number"
+              value={tableNumber}
+              onChange={(e) => setTableNumber(e.target.value.replace(/[^0-9]/g, ""))}
+              className="w-full px-3 py-2 border rounded"
+            />
+          )}
+
+          {(orderType === "pickup" || orderType === "delivery") && (
+            <>
+              <input
+                type="text"
+                placeholder="Full Name"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                className="w-full px-3 py-2 border rounded"
+              />
+
+              <input
+                type="tel"
+                placeholder="Phone (numbers only)"
+                value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value.replace(/[^0-9]/g, ""))}
+                className="w-full px-3 py-2 border rounded"
+              />
+            </>
+          )}
+
+          {orderType === "delivery" && (
+            <textarea
+              placeholder="Full Address"
+              value={customerAddress}
+              onChange={(e) => setCustomerAddress(e.target.value)}
+              className="w-full px-3 py-2 border rounded resize-none"
+              rows={3}
+            />
+          )}
+        </div>
+
+        {/* NOTES */}
+        <textarea
+          placeholder="Special Notes"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          className="w-full px-3 py-2 border rounded resize-none"
+          rows={3}
+        />
+
+        <Button onClick={handlePlaceOrder} disabled={loading} className="w-full py-4">
+          {loading ? "Placing Order..." : `Place Order · £${grandTotal.toFixed(2)}`}
+        </Button>
+
       </div>
-
-      {/* PICKUP / DELIVERY CONTACT */}
-      {(orderType === "pickup" || orderType === "delivery") && !user && (
-        <div className="space-y-3">
-          <input
-            placeholder="Full Name"
-            value={guestName}
-            onChange={(e) => setGuestName(e.target.value)}
-            className="w-full p-3 border rounded"
-          />
-
-          <input
-            type="tel"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            placeholder="Phone Number"
-            value={guestPhone}
-            onChange={(e) =>
-              setGuestPhone(e.target.value.replace(/\D/g, ""))
-            }
-            className="w-full p-3 border rounded"
-          />
-
-          <input
-            type="email"
-            placeholder="Email (optional)"
-            value={guestEmail}
-            onChange={(e) => setGuestEmail(e.target.value)}
-            className="w-full p-3 border rounded"
-          />
-        </div>
-      )}
-
-      {/* DELIVERY ADDRESS */}
-      {orderType === "delivery" && (
-        <div className="space-y-3">
-          <input
-            placeholder="Delivery Address"
-            value={deliveryAddress}
-            onChange={(e) => setDeliveryAddress(e.target.value)}
-            className="w-full p-3 border rounded"
-          />
-
-          <input
-            placeholder="Postcode"
-            value={deliveryPostcode}
-            onChange={(e) => setDeliveryPostcode(e.target.value)}
-            className="w-full p-3 border rounded"
-          />
-        </div>
-      )}
-
-      {/* PLACE ORDER */}
-      <Button
-        onClick={handlePlaceOrder}
-        disabled={loading}
-        className="w-full py-5 text-lg"
-      >
-        {loading ? "Placing Order..." : `Place Order · £${grandTotal.toFixed(2)}`}
-      </Button>
     </div>
   );
 }
