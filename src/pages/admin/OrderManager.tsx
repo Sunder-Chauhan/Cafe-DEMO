@@ -30,9 +30,11 @@ export default function OrderManager() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"active" | "all">("active");
 
-  // 🔴 IMPORTANT — now joins profiles + tables
+  // 🔥 FULL JOIN WITH ALL REQUIRED DATA
   const fetchOrders = async () => {
-    const { data } = await supabase
+    setLoading(true);
+
+    const { data, error } = await supabase
       .from("orders")
       .select(`
         *,
@@ -42,7 +44,17 @@ export default function OrderManager() {
       `)
       .order("created_at", { ascending: false });
 
-    setOrders(data ?? []);
+    if (error) {
+      toast({
+        title: "Error loading orders",
+        description: error.message,
+        variant: "destructive",
+      });
+      setOrders([]);
+    } else {
+      setOrders(data ?? []);
+    }
+
     setLoading(false);
   };
 
@@ -51,128 +63,255 @@ export default function OrderManager() {
 
     const channel = supabase
       .channel("admin-orders")
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, fetchOrders)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "orders" },
+        fetchOrders
+      )
       .subscribe();
 
-    return () => supabase.removeChannel(channel);
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const updateStatus = async (orderId: string, currentStatus: string) => {
     const next = statusFlow[currentStatus];
     if (!next) return;
 
-    const { error } = await supabase.from("orders").update({ status: next }).eq("id", orderId);
-    if (error) return toast({ title: "Error", description: error.message, variant: "destructive" });
+    const { error } = await supabase
+      .from("orders")
+      .update({ status: next })
+      .eq("id", orderId);
+
+    if (error) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
 
     toast({ title: `Order marked as ${next}` });
   };
 
   const cancelOrder = async (orderId: string) => {
-    const { error } = await supabase.from("orders").update({ status: "cancelled" }).eq("id", orderId);
-    if (error) return toast({ title: "Error", description: error.message, variant: "destructive" });
+    const { error } = await supabase
+      .from("orders")
+      .update({ status: "cancelled" })
+      .eq("id", orderId);
+
+    if (error) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
 
     toast({ title: "Order cancelled" });
   };
 
-  if (loading) return <div className="flex justify-center py-12"><div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+  if (loading) {
+    return (
+      <div className="flex justify-center py-12">
+        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
-  const activeOrders = orders.filter(o => o.status !== "served" && o.status !== "cancelled");
+  const activeOrders = orders.filter(
+    (o) => o.status !== "served" && o.status !== "cancelled"
+  );
+
   const displayOrders = filter === "active" ? activeOrders : orders;
+
+  if (displayOrders.length === 0) {
+    return (
+      <div className="bg-card border border-border rounded-lg p-8 text-center">
+        <p className="text-muted-foreground">No orders found</p>
+      </div>
+    );
+  }
 
   return (
     <div>
+      {/* HEADER */}
       <div className="flex items-center justify-between mb-6">
         <h2 className="font-display text-2xl font-bold">Live Orders</h2>
 
         <div className="flex gap-2">
-          <Button size="sm" variant={filter === "active" ? "default" : "outline"} onClick={() => setFilter("active")}>
+          <Button
+            size="sm"
+            variant={filter === "active" ? "default" : "outline"}
+            onClick={() => setFilter("active")}
+          >
             Active ({activeOrders.length})
           </Button>
-          <Button size="sm" variant={filter === "all" ? "default" : "outline"} onClick={() => setFilter("all")}>
+
+          <Button
+            size="sm"
+            variant={filter === "all" ? "default" : "outline"}
+            onClick={() => setFilter("all")}
+          >
             All ({orders.length})
           </Button>
         </div>
       </div>
 
+      {/* ORDERS GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {displayOrders.map(order => {
-
+        {displayOrders.map((order) => {
           const profile = order.profiles;
           const table = order.cafe_tables;
 
           return (
-            <div key={order.id} className="bg-card border border-border rounded-lg p-5">
-
+            <div
+              key={order.id}
+              className="bg-card border border-border rounded-lg p-5"
+            >
               {/* STATUS */}
               <div className="flex items-center justify-between mb-3">
-                <span className={`text-xs font-bold uppercase px-2 py-1 rounded ${statusColors[order.status]}`}>
+                <span
+                  className={`text-xs font-bold uppercase px-2 py-1 rounded ${
+                    statusColors[order.status]
+                  }`}
+                >
                   {order.status}
                 </span>
+
                 <span className="text-xs text-muted-foreground">
                   {new Date(order.created_at).toLocaleTimeString()}
                 </span>
               </div>
 
-              {/* ORDER SOURCE */}
+              {/* ORDER TYPE + SOURCE */}
               <div className="text-sm mb-3 space-y-1">
 
                 {order.order_type === "dine_in" && (
-                  <p><strong>Table:</strong> {table?.table_number ?? "Unknown"}</p>
+                  <p>
+                    <strong>Table:</strong>{" "}
+                    {table?.table_number ?? "Unknown"}
+                  </p>
                 )}
 
                 {order.order_type === "pickup" && (
                   <p><strong>Pickup Order</strong></p>
                 )}
 
-                {/* USER DETAILS */}
+                {order.order_type === "delivery" && (
+                  <p><strong>Delivery Order</strong></p>
+                )}
+
+                {/* CONTACT INFO */}
                 {profile ? (
                   <>
                     <p><strong>Name:</strong> {profile.full_name ?? "—"}</p>
                     <p><strong>Phone:</strong> {profile.phone ?? "—"}</p>
-                    <p className="text-xs text-muted-foreground">{profile.email}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {profile.email ?? ""}
+                    </p>
                   </>
                 ) : (
-                  order.is_guest && <p className="text-xs text-muted-foreground">Guest Order</p>
+                  <>
+                    {order.guest_name && (
+                      <p><strong>Name:</strong> {order.guest_name}</p>
+                    )}
+                    {order.guest_phone && (
+                      <p><strong>Phone:</strong> {order.guest_phone}</p>
+                    )}
+                    {order.guest_email && (
+                      <p className="text-xs text-muted-foreground">
+                        {order.guest_email}
+                      </p>
+                    )}
+                  </>
+                )}
+
+                {/* DELIVERY ADDRESS */}
+                {order.order_type === "delivery" && (
+                  <>
+                    {order.delivery_address && (
+                      <p className="text-xs">
+                        <strong>Address:</strong> {order.delivery_address}
+                      </p>
+                    )}
+                    {order.delivery_city && (
+                      <p className="text-xs">
+                        <strong>City:</strong> {order.delivery_city}
+                      </p>
+                    )}
+                    {order.delivery_postcode && (
+                      <p className="text-xs">
+                        <strong>Postcode:</strong> {order.delivery_postcode}
+                      </p>
+                    )}
+                  </>
                 )}
 
                 {order.coupon_code && (
-                  <p className="text-xs text-green-600">Coupon: {order.coupon_code}</p>
+                  <p className="text-xs text-green-600">
+                    Coupon: {order.coupon_code}
+                  </p>
                 )}
               </div>
 
               {/* ITEMS */}
               <div className="space-y-1 mb-4">
                 {order.order_items?.map((item: any) => (
-                  <div key={item.id} className="flex justify-between text-sm">
-                    <span>{item.item_name} × {item.quantity}</span>
-                    <span>£{(item.price * item.quantity).toFixed(2)}</span>
+                  <div
+                    key={item.id}
+                    className="flex justify-between text-sm"
+                  >
+                    <span>
+                      {item.item_name} × {item.quantity}
+                    </span>
+                    <span>
+                      £{(item.price * item.quantity).toFixed(2)}
+                    </span>
                   </div>
                 ))}
               </div>
 
               {order.notes && (
-                <p className="text-xs text-muted-foreground italic mb-3">Note: {order.notes}</p>
+                <p className="text-xs text-muted-foreground italic mb-3">
+                  Note: {order.notes}
+                </p>
               )}
 
               {/* FOOTER */}
               <div className="flex justify-between items-center pt-3 border-t border-border">
-                <span className="font-bold">£{Number(order.grand_total).toFixed(2)}</span>
+                <span className="font-bold">
+                  £{Number(order.grand_total || order.total).toFixed(2)}
+                </span>
 
                 <div className="flex gap-2">
-                  {order.status !== "served" && order.status !== "cancelled" && (
-                    <Button size="sm" variant="outline" className="text-destructive" onClick={() => cancelOrder(order.id)}>
-                      Cancel
-                    </Button>
-                  )}
+                  {order.status !== "served" &&
+                    order.status !== "cancelled" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-destructive"
+                        onClick={() => cancelOrder(order.id)}
+                      >
+                        Cancel
+                      </Button>
+                    )}
 
                   {statusFlow[order.status] && (
-                    <Button size="sm" onClick={() => updateStatus(order.id, order.status)}>
+                    <Button
+                      size="sm"
+                      onClick={() =>
+                        updateStatus(order.id, order.status)
+                      }
+                    >
                       {statusLabels[order.status]}
                     </Button>
                   )}
                 </div>
               </div>
-
             </div>
           );
         })}
